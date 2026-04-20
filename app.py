@@ -10,6 +10,7 @@ import numpy as np
 import pydeck as pdk
 import altair as alt
 import datetime
+import json
 
 from utils.theme import DARK, LIGHT
 from utils.styles import get_css
@@ -56,58 +57,131 @@ st.markdown(get_css(t, theme_choice), unsafe_allow_html=True)
 
 
 # ──────────────────────────────────────────────────────────────
-# MOCK DATA
+# REAL DATA — CSV + GeoJSON from Nawran
 # ──────────────────────────────────────────────────────────────
 
 @st.cache_data
+def load_zone_metadata():
+    """Extract centroid lat/lon from GeoJSON polygons."""
+    with open("data/zones.geojson") as f:
+        geojson = json.load(f)
+    zones = {}
+    for feature in geojson["features"]:
+        props = feature["properties"]
+        coords = feature["geometry"]["coordinates"][0]
+        lats = [c[1] for c in coords]
+        lons = [c[0] for c in coords]
+        zones[props["name"]] = {
+            "lat": sum(lats) / len(lats),
+            "lon": sum(lons) / len(lons),
+            "zone_id": props.get("zone_id", ""),
+        }
+    return zones
+
+@st.cache_data
+def load_raw_csv():
+    return pd.read_csv("data/eo_monitoring_output.csv", parse_dates=["date"])
+
+def compute_trend(sorted_series):
+    """Compare last two readings to determine direction."""
+    if len(sorted_series) < 2:
+        return "stable"
+    prev, curr = sorted_series.iloc[-2], sorted_series.iloc[-1]
+    if curr > prev + 0.01:
+        return "rising"
+    elif curr < prev - 0.01:
+        return "falling"
+    return "stable"
+
+@st.cache_data
 def load_hydro_data():
-    return pd.DataFrame([
-        {"zone_id":"H1","name":"Temenggor Reservoir","lat":5.416,"lon":101.303,"turbidity":0.28,"status":"normal","trend":"stable","depth_m":45.2,"ph":7.1},
-        {"zone_id":"H2","name":"Kenyir Lake","lat":5.165,"lon":102.837,"turbidity":0.52,"status":"warning","trend":"rising","depth_m":38.7,"ph":6.8},
-        {"zone_id":"H3","name":"Chenderoh Dam","lat":4.983,"lon":101.047,"turbidity":0.71,"status":"critical","trend":"rising","depth_m":32.1,"ph":6.5},
-        {"zone_id":"H4","name":"Perak River Basin","lat":4.750,"lon":100.950,"turbidity":0.35,"status":"normal","trend":"falling","depth_m":41.0,"ph":7.0},
-        {"zone_id":"H5","name":"Bersia Reservoir","lat":5.350,"lon":101.250,"turbidity":0.44,"status":"warning","trend":"rising","depth_m":36.5,"ph":6.9},
-    ])
+    df = load_raw_csv()
+    zones = load_zone_metadata()
+    hydro = df[df["use_case"] == "Hydro monitoring"].copy()
+    result = []
+    for zone_name, group in hydro.groupby("zone"):
+        if zone_name not in zones:
+            continue
+        group = group.sort_values("date")
+        latest = group.iloc[-1]
+        result.append({
+            "zone_id": zones[zone_name]["zone_id"],
+            "name": zone_name,
+            "lat": zones[zone_name]["lat"],
+            "lon": zones[zone_name]["lon"],
+            "turbidity": round(latest["NDTI_mean"], 4),
+            "status": latest["alert_level"],
+            "trend": compute_trend(group["NDTI_mean"]),
+            "ndwi": round(latest["NDWI_mean"], 4),
+            "ndti_min": round(latest["NDTI_min"], 4),
+            "ndti_max": round(latest["NDTI_max"], 4),
+        })
+    return pd.DataFrame(result)
 
 @st.cache_data
 def load_agri_data():
-    return pd.DataFrame([
-        {"zone_id":"A1","name":"Kedah Rice Paddy – North","lat":6.120,"lon":100.370,"ndvi":0.72,"status":"normal","trend":"stable","crop_type":"Rice","area_ha":1200},
-        {"zone_id":"A2","name":"Kedah Rice Paddy – South","lat":6.050,"lon":100.420,"ndvi":0.45,"status":"warning","trend":"falling","crop_type":"Rice","area_ha":850},
-        {"zone_id":"A3","name":"Penang Palm Oil Estate","lat":5.280,"lon":100.450,"ndvi":0.38,"status":"critical","trend":"falling","crop_type":"Palm Oil","area_ha":2400},
-        {"zone_id":"A4","name":"Perlis Sugarcane Field","lat":6.450,"lon":100.190,"ndvi":0.65,"status":"normal","trend":"rising","crop_type":"Sugarcane","area_ha":600},
-        {"zone_id":"A5","name":"Perak Rubber Plantation","lat":4.590,"lon":101.090,"ndvi":0.51,"status":"warning","trend":"stable","crop_type":"Rubber","area_ha":1800},
-        {"zone_id":"A6","name":"Kedah Durian Orchard","lat":5.950,"lon":100.550,"ndvi":0.33,"status":"critical","trend":"falling","crop_type":"Durian","area_ha":320},
-    ])
+    df = load_raw_csv()
+    zones = load_zone_metadata()
+    agri = df[df["use_case"] == "Agriculture monitoring"].copy()
+    result = []
+    for zone_name, group in agri.groupby("zone"):
+        if zone_name not in zones:
+            continue
+        group = group.sort_values("date")
+        latest = group.iloc[-1]
+        result.append({
+            "zone_id": zones[zone_name]["zone_id"],
+            "name": zone_name,
+            "lat": zones[zone_name]["lat"],
+            "lon": zones[zone_name]["lon"],
+            "ndvi": round(latest["NDVI_mean"], 4),
+            "status": latest["alert_level"],
+            "trend": compute_trend(group["NDVI_mean"]),
+            "ndre": round(latest["NDRE_mean"], 4),
+            "ndvi_min": round(latest["NDVI_min"], 4),
+            "ndvi_max": round(latest["NDVI_max"], 4),
+        })
+    return pd.DataFrame(result)
 
 @st.cache_data
 def load_hydro_trends():
-    return pd.DataFrame({"week":["Week 1","Week 2","Week 3","Week 4","Week 5","Week 6"],
-        "Temenggor":[0.22,0.24,0.23,0.25,0.27,0.28],"Kenyir":[0.30,0.35,0.40,0.45,0.48,0.52],
-        "Chenderoh":[0.35,0.42,0.51,0.58,0.65,0.71],"Perak Basin":[0.28,0.30,0.32,0.34,0.36,0.35],
-        "Bersia":[0.31,0.33,0.36,0.38,0.40,0.44]})
+    df = load_raw_csv()
+    hydro = df[df["use_case"] == "Hydro monitoring"][["date","zone","NDTI_mean"]].copy()
+    pivot = hydro.pivot(index="date", columns="zone", values="NDTI_mean")
+    pivot = pivot.sort_index().reset_index()
+    pivot.columns.name = None
+    pivot["date"] = pivot["date"].dt.strftime("%d %b %Y")
+    return pivot
 
 @st.cache_data
 def load_agri_trends():
-    return pd.DataFrame({"week":["Week 1","Week 2","Week 3","Week 4","Week 5","Week 6"],
-        "Kedah North":[0.75,0.74,0.73,0.73,0.72,0.72],"Kedah South":[0.60,0.57,0.53,0.50,0.47,0.45],
-        "Penang Palm":[0.55,0.50,0.47,0.43,0.40,0.38],"Perlis":[0.58,0.60,0.61,0.63,0.64,0.65],
-        "Perak Rubber":[0.54,0.53,0.52,0.52,0.51,0.51],"Durian Orchard":[0.50,0.47,0.44,0.40,0.36,0.33]})
+    df = load_raw_csv()
+    agri = df[df["use_case"] == "Agriculture monitoring"][["date","zone","NDVI_mean"]].copy()
+    pivot = agri.pivot(index="date", columns="zone", values="NDVI_mean")
+    pivot = pivot.sort_index().reset_index()
+    pivot.columns.name = None
+    pivot["date"] = pivot["date"].dt.strftime("%d %b %Y")
+    return pivot
 
-def get_all_alerts(view):
-    if view=="Hydro Reservoir":
-        return [
-            {"severity":"critical","status":"critical","zone":"Chenderoh Dam","time":"08:12","message":"Turbidity exceeded 0.70 — possible sediment discharge upstream. Immediate inspection recommended."},
-            {"severity":"warning","status":"warning","zone":"Kenyir Lake","time":"08:05","message":"Turbidity rising for 4 consecutive weeks. Approaching critical threshold (0.60)."},
-            {"severity":"warning","status":"warning","zone":"Bersia Reservoir","time":"08:05","message":"Turbidity at 0.44 and trending upward. Monitor closely for next satellite pass."},
-        ]
-    else:
-        return [
-            {"severity":"critical","status":"critical","zone":"Penang Palm Oil Estate","time":"08:12","message":"NDVI dropped below 0.40 — vegetation stress detected. Possible pest infestation or water deficit."},
-            {"severity":"critical","status":"critical","zone":"Kedah Durian Orchard","time":"08:12","message":"NDVI at 0.33 — severe crop stress over 320 ha. Recommend ground inspection."},
-            {"severity":"warning","status":"warning","zone":"Kedah Rice Paddy – South","time":"08:05","message":"NDVI declining for 4 consecutive weeks across 850 ha of rice cultivation."},
-            {"severity":"warning","status":"warning","zone":"Perak Rubber Plantation","time":"08:05","message":"NDVI below optimal range (0.55) for rubber cultivation. 1,800 ha affected."},
-        ]
+def get_all_alerts(zone_df, vcol):
+    alerts = []
+    time_str = datetime.datetime.now().strftime("%H:%M")
+    non_normal = zone_df[zone_df["status"] != "normal"].copy()
+    order = {"critical": 0, "warning": 1}
+    non_normal = non_normal.assign(_o=non_normal["status"].map(order)).sort_values("_o")
+    for _, row in non_normal.iterrows():
+        val = row[vcol]
+        if vcol == "turbidity":
+            msg = (f"NDTI at {val} — turbidity critical. Immediate inspection recommended."
+                   if row["status"] == "critical"
+                   else f"NDTI at {val} — turbidity elevated. Monitor closely for next satellite pass.")
+        else:
+            msg = (f"NDVI at {val} — severe vegetation stress detected. Ground inspection recommended."
+                   if row["status"] == "critical"
+                   else f"NDVI at {val} — vegetation health below optimal. Monitor closely.")
+        alerts.append({"severity": row["status"], "status": row["status"],
+                        "zone": row["name"], "time": time_str, "message": msg})
+    return alerts
 
 
 # ──────────────────────────────────────────────────────────────
@@ -136,9 +210,12 @@ def build_map(df, vcol):
             <div style='font-family:Inter,sans-serif;padding:12px 16px;max-width:260px;'>
                 <div style='font-size:15px;font-weight:600;color:{t['text1']};margin-bottom:8px;'>{{name}}</div>
                 <div style='font-size:12px;color:{t['text3']};margin-bottom:4px;'>
-                    Turbidity: <b style="color:{t['text1']}">{{turbidity}}</b> · pH: <b style="color:{t['text1']}">{{ph}}</b>
+                    NDTI: <b style="color:{t['text1']}">{{turbidity}}</b>
                 </div>
-                <div style='font-size:12px;color:{t['text3']};margin-bottom:4px;'>Depth: {{depth_m}}m</div>
+                <div style='font-size:12px;color:{t['text3']};margin-bottom:4px;'>
+                    Range: {{ndti_min}} to {{ndti_max}}
+                </div>
+                <div style='font-size:12px;color:{t['text3']};margin-bottom:4px;'>NDWI: {{ndwi}}</div>
                 <div style='font-size:11px;color:{t['text4']};border-top:1px solid {t['border']};padding-top:6px;margin-top:4px;'>
                     Status: <b>{{status}}</b> · Trend: {{trend}}
                 </div>
@@ -148,9 +225,12 @@ def build_map(df, vcol):
             <div style='font-family:Inter,sans-serif;padding:12px 16px;max-width:260px;'>
                 <div style='font-size:15px;font-weight:600;color:{t['text1']};margin-bottom:8px;'>{{name}}</div>
                 <div style='font-size:12px;color:{t['text3']};margin-bottom:4px;'>
-                    NDVI: <b style="color:{t['text1']}">{{ndvi}}</b> · Area: <b style="color:{t['text1']}">{{area_ha}} ha</b>
+                    NDVI: <b style="color:{t['text1']}">{{ndvi}}</b>
                 </div>
-                <div style='font-size:12px;color:{t['text3']};margin-bottom:4px;'>Crop: {{crop_type}}</div>
+                <div style='font-size:12px;color:{t['text3']};margin-bottom:4px;'>
+                    Range: {{ndvi_min}} to {{ndvi_max}}
+                </div>
+                <div style='font-size:12px;color:{t['text3']};margin-bottom:4px;'>NDRE: {{ndre}}</div>
                 <div style='font-size:11px;color:{t['text4']};border-top:1px solid {t['border']};padding-top:6px;margin-top:4px;'>
                     Status: <b>{{status}}</b> · Trend: {{trend}}
                 </div>
@@ -202,13 +282,13 @@ def build_map(df, vcol):
 # ──────────────────────────────────────────────────────────────
 
 def build_trend_chart(tdf, vcol):
-    long_df      = tdf.melt(id_vars="week", var_name="Zone", value_name=vcol.upper())
-    week_order   = tdf["week"].tolist()
+    long_df      = tdf.melt(id_vars="date", var_name="Zone", value_name=vcol.upper())
+    date_order   = tdf["date"].tolist()
     color_scale  = alt.Scale(range=[t['green'], t['amber'], t['red'], t['blue'], "#a78bfa", "#f472b6"])
     y_domain     = [0, 0.85] if vcol == "ndvi" else [0, 0.8]
 
     base = alt.Chart(long_df).encode(
-        x=alt.X("week:N", sort=week_order, title=None,
+        x=alt.X("date:N", sort=date_order, title=None,
             axis=alt.Axis(labelColor=t['text4'], labelFontSize=11, labelFont="Inter",
                           tickColor="transparent", domainColor=t['border'],
                           labelAngle=0, labelPadding=10)),
@@ -223,9 +303,9 @@ def build_trend_chart(tdf, vcol):
     lines  = base.mark_line(strokeWidth=2.5, opacity=0.9)
     points = base.mark_circle(size=50, opacity=1).encode(
         tooltip=[
-            alt.Tooltip("week:N",           title="Week"),
-            alt.Tooltip("Zone:N",           title="Zone"),
-            alt.Tooltip(f"{vcol.upper()}:Q", title=vcol.upper(), format=".2f"),
+            alt.Tooltip("date:N",            title="Date"),
+            alt.Tooltip("Zone:N",            title="Zone"),
+            alt.Tooltip(f"{vcol.upper()}:Q", title=vcol.upper(), format=".4f"),
         ]
     )
     return (lines + points).properties(height=300, background="transparent") \
@@ -286,7 +366,7 @@ filt=all_z[all_z["status"].isin(active_st)].copy()
 tot=len(all_z); ft=len(filt)
 nc=len(filt[filt["status"]=="critical"]); nw=len(filt[filt["status"]=="warning"]); nn=len(filt[filt["status"]=="normal"])
 av=round(filt[vcol].mean(),2) if not filt.empty else 0
-f_alr=[a for a in get_all_alerts(view_choice) if a["status"] in active_st]
+f_alr=[a for a in get_all_alerts(all_z, vcol) if a["status"] in active_st]
 
 
 # ══════════════════════════════════════════════════════════════
@@ -373,7 +453,7 @@ with dc:
             s  = STATUS[r["status"]]
             v  = r[vcol]
             ta={"rising":"↑","falling":"↓"}.get(r["trend"],"→")
-            dl=f"Depth: {r['depth_m']}m · pH: {r['ph']}" if vcol=="turbidity" else f"{r['crop_type']} · {r['area_ha']} ha"
+            dl=f"NDWI: {r['ndwi']}" if vcol=="turbidity" else f"NDRE: {r['ndre']}"
             st.markdown(f"""<div class="zcard {s['card']}"><div style="display:flex;justify-content:space-between;align-items:flex-start;">
                 <div><div class="zname"><span class="dot {s['dot']}"></span>{r['name']}</div><div class="zmeta">{dl}</div></div>
                 <div style="text-align:right;"><div class="zval {s['color']}">{v}</div><div style="font-size:10px;color:{t['text4']};">{ta} {r['trend']}</div></div></div></div>""", unsafe_allow_html=True)
@@ -385,7 +465,7 @@ with dc:
 
 st.markdown("")
 st.markdown(f"""<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-    <span class="panel-label" style="margin:0;">TREND: {mname} — 6 Weeks</span><span class="note-box">{tnote}</span></div>""", unsafe_allow_html=True)
+    <span class="panel-label" style="margin:0;">TREND: {mname} — Historical Readings</span><span class="note-box">{tnote}</span></div>""", unsafe_allow_html=True)
 st.altair_chart(build_trend_chart(tdf,vcol), use_container_width=True)
 
 

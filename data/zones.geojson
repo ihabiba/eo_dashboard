@@ -1,0 +1,77 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Timah Tasoh Reservoir",
+        "location": "Perlis, Malaysia",
+        "use_case": "Hydro monitoring",
+        "zone_id": "reservoir"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              100.27,
+              6.43
+            ],
+            [
+              100.35,
+              6.43
+            ],
+            [
+              100.35,
+              6.5
+            ],
+            [
+              100.27,
+              6.5
+            ],
+            [
+              100.27,
+              6.43
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Palm Oil Plantation",
+        "location": "Johor, Malaysia",
+        "use_case": "Agriculture monitoring",
+        "zone_id": "farm"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              103.5,
+              1.8
+            ],
+            [
+              103.65,
+              1.8
+            ],
+            [
+              103.65,
+              1.95
+            ],
+            [
+              103.5,
+              1.95
+            ],
+            [
+              103.5,
+              1.8
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

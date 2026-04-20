@@ -1,0 +1,7 @@
+date,zone,location,use_case,NDVI_mean,NDVI_min,NDVI_max,NDRE_mean,NDTI_mean,NDTI_min,NDTI_max,NDWI_mean,alert_level
+12/16/2025,Timah Tasoh Reservoir,"Perlis, Malaysia",Hydro monitoring,,,,,-0.1078,-0.557,0.6785,-0.6157,normal
+1/15/2026,Timah Tasoh Reservoir,"Perlis, Malaysia",Hydro monitoring,,,,,-0.0096,-0.5281,0.5004,-0.5538,normal
+2/14/2026,Timah Tasoh Reservoir,"Perlis, Malaysia",Hydro monitoring,,,,,-0.0462,-0.5356,0.5098,-0.3588,normal
+3/16/2026,Timah Tasoh Reservoir,"Perlis, Malaysia",Hydro monitoring,,,,,-0.0052,-0.544,0.5056,-0.5077,normal
+11/16/2025,Palm Oil Plantation,"Johor, Malaysia",Agriculture monitoring,0.7656,-0.3148,0.924,0.5721,,,,,normal
+3/16/2026,Palm Oil Plantation,"Johor, Malaysia",Agriculture monitoring,0.7327,-0.2181,0.9947,0.5401,,,,,normal
