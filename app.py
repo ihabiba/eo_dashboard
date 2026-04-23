@@ -10,7 +10,6 @@ import pydeck as pdk
 import altair as alt
 import datetime
 import json
-
 import requests
 
 from utils.theme import DARK, LIGHT
@@ -25,22 +24,22 @@ def send_telegram(chat_id, message):
     if not token:
         return False, "Bot token not configured in secrets."
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    resp = requests.post(url, json={"chat_id": chat_id, "text": message, "parse_mode": "HTML"})
-    if resp.status_code == 200:
+    response = requests.post(url, json={"chat_id": chat_id, "text": message, "parse_mode": "HTML"})
+    if response.status_code == 200:
         return True, "Sent"
-    return False, resp.json().get("description", "Unknown error")
+    return False, response.json().get("description", "Unknown error")
 
-def build_alert_message(zone_name, index_val, status, vcol, module):
+def build_alert_message(zone_name, index_value, status, value_col, module_name):
     now = datetime.datetime.now().strftime("%d %b %Y, %H:%M")
-    index_label = "NDTI" if vcol == "turbidity" else "NDVI"
+    index_label = "NDTI" if value_col == "turbidity" else "NDVI"
     status_emoji = "🔴" if status == "critical" else "🟡"
-    status_line  = "CRITICAL" if status == "critical" else "WARNING"
+    status_label = "CRITICAL" if status == "critical" else "WARNING"
     return (
-        f"<b>{status_emoji} {status_line} — {module} Zone Alert</b>\n\n"
+        f"<b>{status_emoji} {status_label} — {module_name} Zone Alert</b>\n\n"
         f"<b>Zone:</b> {zone_name}\n"
         f"<b>Time:</b> {now}\n"
-        f"<b>{index_label}:</b> {index_val}\n"
-        f"<b>Status:</b> {status_line}\n\n"
+        f"<b>{index_label}:</b> {index_value}\n"
+        f"<b>Status:</b> {status_label}\n\n"
         f"Please open the dashboard to review the latest readings and take action if needed.\n\n"
         f"<i>TNB Siltation Monitor — EO Dashboard</i>"
     )
@@ -59,8 +58,6 @@ st.set_page_config(
 # ──────────────────────────────────────────────────────────────
 # THEME SYSTEM
 # ──────────────────────────────────────────────────────────────
-# Colors live in utils/theme.py — imported at the top of this file.
-# Theme selection in sidebar (before other sidebar content)
 with st.sidebar:
     st.markdown("""
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;">
@@ -88,20 +85,20 @@ st.markdown(get_css(t, theme_choice), unsafe_allow_html=True)
 
 
 # ──────────────────────────────────────────────────────────────
-# SAMPLE DATA — CSV + GeoJSON from Nawran
+# DATA LOADING — CSV + GeoJSON
 # ──────────────────────────────────────────────────────────────
 
 @st.cache_data
 def load_zone_metadata():
     """Extract centroid lat/lon from GeoJSON polygons."""
-    with open("data/zones.geojson") as f:
-        geojson = json.load(f)
+    with open("data/zones.geojson") as geojson_file:
+        geojson = json.load(geojson_file)
     zones = {}
     for feature in geojson["features"]:
         props = feature["properties"]
         coords = feature["geometry"]["coordinates"][0]
-        lats = [c[1] for c in coords]
-        lons = [c[0] for c in coords]
+        lats = [coord[1] for coord in coords]
+        lons = [coord[0] for coord in coords]
         zones[props["name"]] = {
             "lat": sum(lats) / len(lats),
             "lon": sum(lons) / len(lons),
@@ -113,14 +110,14 @@ def load_zone_metadata():
 def load_raw_csv():
     return pd.read_csv("data/eo_monitoring_output.csv", parse_dates=["date"])
 
-def compute_trend(sorted_series):
+def compute_trend(sorted_values):
     """Compare last two readings to determine direction."""
-    if len(sorted_series) < 2:
+    if len(sorted_values) < 2:
         return "stable"
-    prev, curr = sorted_series.iloc[-2], sorted_series.iloc[-1]
-    if curr > prev + 0.01:
+    previous, current = sorted_values.iloc[-2], sorted_values.iloc[-1]
+    if current > previous + 0.01:
         return "rising"
-    elif curr < prev - 0.01:
+    elif current < previous - 0.01:
         return "falling"
     return "stable"
 
@@ -128,24 +125,24 @@ def compute_trend(sorted_series):
 def load_hydro_data():
     df = load_raw_csv()
     zones = load_zone_metadata()
-    hydro = df[df["use_case"] == "Hydro monitoring"].copy()
+    hydro_df = df[df["use_case"] == "Hydro monitoring"].copy()
     result = []
-    for zone_name, group in hydro.groupby("zone"):
+    for zone_name, group in hydro_df.groupby("zone"):
         if zone_name not in zones:
             continue
         group = group.sort_values("date")
-        latest = group.iloc[-1]
+        latest_row = group.iloc[-1]
         result.append({
-            "zone_id": zones[zone_name]["zone_id"],
-            "name": zone_name,
-            "lat": zones[zone_name]["lat"],
-            "lon": zones[zone_name]["lon"],
-            "turbidity": round(latest["NDTI_mean"], 4),
-            "status": latest["alert_level"],
-            "trend": compute_trend(group["NDTI_mean"]),
-            "ndwi": round(latest["NDWI_mean"], 4),
-            "ndti_min": round(latest["NDTI_min"], 4),
-            "ndti_max": round(latest["NDTI_max"], 4),
+            "zone_id":  zones[zone_name]["zone_id"],
+            "name":     zone_name,
+            "lat":      zones[zone_name]["lat"],
+            "lon":      zones[zone_name]["lon"],
+            "turbidity": round(latest_row["NDTI_mean"], 4),
+            "status":   latest_row["alert_level"],
+            "trend":    compute_trend(group["NDTI_mean"]),
+            "ndwi":     round(latest_row["NDWI_mean"], 4),
+            "ndti_min": round(latest_row["NDTI_min"], 4),
+            "ndti_max": round(latest_row["NDTI_max"], 4),
         })
     return pd.DataFrame(result)
 
@@ -153,32 +150,32 @@ def load_hydro_data():
 def load_agri_data():
     df = load_raw_csv()
     zones = load_zone_metadata()
-    agri = df[df["use_case"] == "Agriculture monitoring"].copy()
+    agri_df = df[df["use_case"] == "Agriculture monitoring"].copy()
     result = []
-    for zone_name, group in agri.groupby("zone"):
+    for zone_name, group in agri_df.groupby("zone"):
         if zone_name not in zones:
             continue
         group = group.sort_values("date")
-        latest = group.iloc[-1]
+        latest_row = group.iloc[-1]
         result.append({
-            "zone_id": zones[zone_name]["zone_id"],
-            "name": zone_name,
-            "lat": zones[zone_name]["lat"],
-            "lon": zones[zone_name]["lon"],
-            "ndvi": round(latest["NDVI_mean"], 4),
-            "status": latest["alert_level"],
-            "trend": compute_trend(group["NDVI_mean"]),
-            "ndre": round(latest["NDRE_mean"], 4),
-            "ndvi_min": round(latest["NDVI_min"], 4),
-            "ndvi_max": round(latest["NDVI_max"], 4),
+            "zone_id":  zones[zone_name]["zone_id"],
+            "name":     zone_name,
+            "lat":      zones[zone_name]["lat"],
+            "lon":      zones[zone_name]["lon"],
+            "ndvi":     round(latest_row["NDVI_mean"], 4),
+            "status":   latest_row["alert_level"],
+            "trend":    compute_trend(group["NDVI_mean"]),
+            "ndre":     round(latest_row["NDRE_mean"], 4),
+            "ndvi_min": round(latest_row["NDVI_min"], 4),
+            "ndvi_max": round(latest_row["NDVI_max"], 4),
         })
     return pd.DataFrame(result)
 
 @st.cache_data
 def load_hydro_trends():
     df = load_raw_csv()
-    hydro = df[df["use_case"] == "Hydro monitoring"][["date","zone","NDTI_mean"]].copy()
-    pivot = hydro.pivot(index="date", columns="zone", values="NDTI_mean")
+    hydro_df = df[df["use_case"] == "Hydro monitoring"][["date", "zone", "NDTI_mean"]].copy()
+    pivot = hydro_df.pivot(index="date", columns="zone", values="NDTI_mean")
     pivot = pivot.sort_index().reset_index()
     pivot.columns.name = None
     pivot["date"] = pivot["date"].dt.strftime("%d %b %Y")
@@ -187,58 +184,69 @@ def load_hydro_trends():
 @st.cache_data
 def load_agri_trends():
     df = load_raw_csv()
-    agri = df[df["use_case"] == "Agriculture monitoring"][["date","zone","NDVI_mean"]].copy()
-    pivot = agri.pivot(index="date", columns="zone", values="NDVI_mean")
+    agri_df = df[df["use_case"] == "Agriculture monitoring"][["date", "zone", "NDVI_mean"]].copy()
+    pivot = agri_df.pivot(index="date", columns="zone", values="NDVI_mean")
     pivot = pivot.sort_index().reset_index()
     pivot.columns.name = None
     pivot["date"] = pivot["date"].dt.strftime("%d %b %Y")
     return pivot
 
-def get_all_alerts(zone_df, vcol):
+def get_all_alerts(zones_df, value_col):
     alerts = []
     time_str = datetime.datetime.now().strftime("%H:%M")
-    non_normal = zone_df[zone_df["status"] != "normal"].copy()
-    order = {"critical": 0, "warning": 1}
-    non_normal = non_normal.assign(_o=non_normal["status"].map(order)).sort_values("_o")
-    for _, row in non_normal.iterrows():
-        val = row[vcol]
-        if vcol == "turbidity":
-            msg = (f"NDTI at {val} — turbidity critical. Immediate inspection recommended."
-                   if row["status"] == "critical"
-                   else f"NDTI at {val} — turbidity elevated. Monitor closely for next satellite pass.")
+    non_normal_zones = zones_df[zones_df["status"] != "normal"].copy()
+    severity_order = {"critical": 0, "warning": 1}
+    non_normal_zones = non_normal_zones.assign(
+        _sort=non_normal_zones["status"].map(severity_order)
+    ).sort_values("_sort")
+    for _, zone_row in non_normal_zones.iterrows():
+        index_value = zone_row[value_col]
+        if value_col == "turbidity":
+            message = (
+                f"NDTI at {index_value} — turbidity critical. Immediate inspection recommended."
+                if zone_row["status"] == "critical"
+                else f"NDTI at {index_value} — turbidity elevated. Monitor closely for next satellite pass."
+            )
         else:
-            msg = (f"NDVI at {val} — severe vegetation stress detected. Ground inspection recommended."
-                   if row["status"] == "critical"
-                   else f"NDVI at {val} — vegetation health below optimal. Monitor closely.")
-        alerts.append({"severity": row["status"], "status": row["status"],
-                        "zone": row["name"], "time": time_str, "message": msg})
+            message = (
+                f"NDVI at {index_value} — severe vegetation stress detected. Ground inspection recommended."
+                if zone_row["status"] == "critical"
+                else f"NDVI at {index_value} — vegetation health below optimal. Monitor closely."
+            )
+        alerts.append({
+            "severity": zone_row["status"],
+            "status":   zone_row["status"],
+            "zone":     zone_row["name"],
+            "time":     time_str,
+            "message":  message,
+        })
     return alerts
 
-def classify_hydro_status(df, warn_thresh, crit_thresh):
-    df = df.copy()
-    def _s(v):
-        if v >= crit_thresh: return "critical"
-        if v >= warn_thresh: return "warning"
+def classify_hydro_status(zones_df, warning_threshold, critical_threshold):
+    zones_df = zones_df.copy()
+    def get_status(turbidity_value):
+        if turbidity_value >= critical_threshold: return "critical"
+        if turbidity_value >= warning_threshold:  return "warning"
         return "normal"
-    df["status"] = df["turbidity"].apply(_s)
-    return df
+    zones_df["status"] = zones_df["turbidity"].apply(get_status)
+    return zones_df
 
-def classify_agri_status(df, warn_thresh, crit_thresh):
-    df = df.copy()
-    def _s(v):
-        if v < crit_thresh: return "critical"
-        if v < warn_thresh: return "warning"
+def classify_agri_status(zones_df, warning_threshold, critical_threshold):
+    zones_df = zones_df.copy()
+    def get_status(ndvi_value):
+        if ndvi_value < critical_threshold: return "critical"
+        if ndvi_value < warning_threshold:  return "warning"
         return "normal"
-    df["status"] = df["ndvi"].apply(_s)
-    return df
+    zones_df["status"] = zones_df["ndvi"].apply(get_status)
+    return zones_df
 
 
 # ──────────────────────────────────────────────────────────────
 # MAP
 # ──────────────────────────────────────────────────────────────
 
-def build_map(df, vcol):
-    map_df = df.copy()
+def build_map(zones_df, value_col):
+    map_df = zones_df.copy()
 
     # pydeck needs colors as (R, G, B, Alpha) tuples, not hex
     color_map = {
@@ -254,7 +262,7 @@ def build_map(df, vcol):
     map_df["a"]      = map_df["status"].map(lambda s: color_map[s][3])
     map_df["radius"] = map_df["status"].map(radius_map)
 
-    if vcol == "turbidity":
+    if value_col == "turbidity":
         tooltip_html = f"""
             <div style='font-family:Inter,sans-serif;padding:12px 16px;max-width:260px;'>
                 <div style='font-size:15px;font-weight:600;color:{t['text1']};margin-bottom:8px;'>{{name}}</div>
@@ -286,11 +294,11 @@ def build_map(df, vcol):
             </div>"""
 
     layers = []
-    critical_df = map_df[map_df["status"] == "critical"].copy()
-    if not critical_df.empty:
-        critical_df["glow_radius"] = critical_df["radius"] * 2.5
+    critical_zones = map_df[map_df["status"] == "critical"].copy()
+    if not critical_zones.empty:
+        critical_zones["glow_radius"] = critical_zones["radius"] * 2.5
         layers.append(pdk.Layer(
-            "ScatterplotLayer", data=critical_df,
+            "ScatterplotLayer", data=critical_zones,
             get_position=["lon", "lat"],
             get_color=[color_map["critical"][0], color_map["critical"][1], color_map["critical"][2], 30],
             get_radius="glow_radius", pickable=False,
@@ -306,7 +314,7 @@ def build_map(df, vcol):
     view_state = pdk.ViewState(
         latitude=float(map_df["lat"].mean()),
         longitude=float(map_df["lon"].mean()),
-        zoom=7.2 if vcol == "turbidity" else 7.5,
+        zoom=7.2 if value_col == "turbidity" else 7.5,
         pitch=0,
     )
     return pdk.Deck(
@@ -330,18 +338,18 @@ def build_map(df, vcol):
 # ALTAIR CHART
 # ──────────────────────────────────────────────────────────────
 
-def build_trend_chart(tdf, vcol):
-    long_df      = tdf.melt(id_vars="date", var_name="Zone", value_name=vcol.upper())
-    date_order   = tdf["date"].tolist()
-    color_scale  = alt.Scale(range=[t['green'], t['amber'], t['red'], t['blue'], "#a78bfa", "#f472b6"])
-    y_domain     = [0, 0.85] if vcol == "ndvi" else [0, 0.8]
+def build_trend_chart(trends_df, value_col):
+    long_df     = trends_df.melt(id_vars="date", var_name="Zone", value_name=value_col.upper())
+    date_order  = trends_df["date"].tolist()
+    color_scale = alt.Scale(range=[t['green'], t['amber'], t['red'], t['blue'], "#a78bfa", "#f472b6"])
+    y_domain    = [0, 0.85] if value_col == "ndvi" else [0, 0.8]
 
     base = alt.Chart(long_df).encode(
         x=alt.X("date:N", sort=date_order, title=None,
             axis=alt.Axis(labelColor=t['text4'], labelFontSize=11, labelFont="Inter",
                           tickColor="transparent", domainColor=t['border'],
                           labelAngle=0, labelPadding=10)),
-        y=alt.Y(f"{vcol.upper()}:Q", scale=alt.Scale(domain=y_domain), title=None,
+        y=alt.Y(f"{value_col.upper()}:Q", scale=alt.Scale(domain=y_domain), title=None,
             axis=alt.Axis(labelColor=t['text4'], labelFontSize=10, labelFont="JetBrains Mono",
                           gridColor=t['chart_grid'], tickColor="transparent", domainColor="transparent")),
         color=alt.Color("Zone:N", scale=color_scale, title="Zone",
@@ -352,9 +360,9 @@ def build_trend_chart(tdf, vcol):
     lines  = base.mark_line(strokeWidth=2.5, opacity=0.9)
     points = base.mark_circle(size=50, opacity=1).encode(
         tooltip=[
-            alt.Tooltip("date:N",            title="Date"),
-            alt.Tooltip("Zone:N",            title="Zone"),
-            alt.Tooltip(f"{vcol.upper()}:Q", title=vcol.upper(), format=".4f"),
+            alt.Tooltip("date:N",                title="Date"),
+            alt.Tooltip("Zone:N",                title="Zone"),
+            alt.Tooltip(f"{value_col.upper()}:Q", title=value_col.upper(), format=".4f"),
         ]
     )
     return (lines + points).properties(height=300, background="transparent") \
@@ -363,40 +371,40 @@ def build_trend_chart(tdf, vcol):
 
 
 # ══════════════════════════════════════════════════════════════
-# REST OF SIDEBAR
+# SIDEBAR — MODULE, FILTERS, THRESHOLDS, SUBSCRIPTION
 # ══════════════════════════════════════════════════════════════
 
 with st.sidebar:
     st.markdown("---")
     st.markdown(f'<p class="sb-label">Monitoring Module</p>', unsafe_allow_html=True)
-    view_choice = st.radio("Module", ["Hydro Reservoir","Agriculture"], label_visibility="collapsed")
+    view_choice = st.radio("Module", ["Hydro Reservoir", "Agriculture"], label_visibility="collapsed")
 
     st.markdown("---")
     st.markdown(f'<p class="sb-label">Status Filter</p>', unsafe_allow_html=True)
-    s_n=st.checkbox("Normal",value=True)
-    s_w=st.checkbox("Warning",value=True)
-    s_c=st.checkbox("Critical",value=True)
-    active_st=[]
-    if s_n: active_st.append("normal")
-    if s_w: active_st.append("warning")
-    if s_c: active_st.append("critical")
+    show_normal   = st.checkbox("Normal",   value=True)
+    show_warning  = st.checkbox("Warning",  value=True)
+    show_critical = st.checkbox("Critical", value=True)
+    active_statuses = []
+    if show_normal:   active_statuses.append("normal")
+    if show_warning:  active_statuses.append("warning")
+    if show_critical: active_statuses.append("critical")
 
     st.markdown("---")
     st.markdown(f'<p class="sb-label">Thresholds</p>', unsafe_allow_html=True)
     if view_choice == "Hydro Reservoir":
-        warn_thresh = st.slider("Warning level (NDTI >=)", 0.0, 1.0, 0.40, 0.05, key="hydro_warn")
-        crit_thresh = st.slider("Critical level (NDTI >=)", 0.0, 1.0, 0.60, 0.05, key="hydro_crit")
+        warning_threshold  = st.slider("Warning level (NDTI >=)", 0.0, 1.0, 0.40, 0.05, key="hydro_warn")
+        critical_threshold = st.slider("Critical level (NDTI >=)", 0.0, 1.0, 0.60, 0.05, key="hydro_crit")
         st.markdown(f"""<div style="font-size:10.5px;line-height:2.2;color:{t['sb_text']};">
-            <span style="color:{t['green']};">●</span> Normal: &lt; {warn_thresh:.2f}<br>
-            <span style="color:{t['amber']};">●</span> Warning: {warn_thresh:.2f} – {crit_thresh:.2f}<br>
-            <span style="color:{t['red']};">●</span> Critical: ≥ {crit_thresh:.2f}</div>""", unsafe_allow_html=True)
+            <span style="color:{t['green']};">●</span> Normal: &lt; {warning_threshold:.2f}<br>
+            <span style="color:{t['amber']};">●</span> Warning: {warning_threshold:.2f} – {critical_threshold:.2f}<br>
+            <span style="color:{t['red']};">●</span> Critical: ≥ {critical_threshold:.2f}</div>""", unsafe_allow_html=True)
     else:
-        warn_thresh = st.slider("Warning level (NDVI <)", 0.0, 1.0, 0.55, 0.05, key="agri_warn")
-        crit_thresh = st.slider("Critical level (NDVI <)", 0.0, 1.0, 0.40, 0.05, key="agri_crit")
+        warning_threshold  = st.slider("Warning level (NDVI <)", 0.0, 1.0, 0.55, 0.05, key="agri_warn")
+        critical_threshold = st.slider("Critical level (NDVI <)", 0.0, 1.0, 0.40, 0.05, key="agri_crit")
         st.markdown(f"""<div style="font-size:10.5px;line-height:2.2;color:{t['sb_text']};">
-            <span style="color:{t['green']};">●</span> Normal: &gt; {warn_thresh:.2f}<br>
-            <span style="color:{t['amber']};">●</span> Warning: {crit_thresh:.2f} – {warn_thresh:.2f}<br>
-            <span style="color:{t['red']};">●</span> Critical: &lt; {crit_thresh:.2f}</div>""", unsafe_allow_html=True)
+            <span style="color:{t['green']};">●</span> Normal: &gt; {warning_threshold:.2f}<br>
+            <span style="color:{t['amber']};">●</span> Warning: {critical_threshold:.2f} – {warning_threshold:.2f}<br>
+            <span style="color:{t['red']};">●</span> Critical: &lt; {critical_threshold:.2f}</div>""", unsafe_allow_html=True)
 
     st.markdown("---")
     st.markdown(f'<p class="sb-label">Alert Subscription</p>', unsafe_allow_html=True)
@@ -407,37 +415,37 @@ with st.sidebar:
         label_visibility="collapsed",
         key="chat_id_input"
     )
-    sub_col1, sub_col2 = st.columns(2)
-    with sub_col1:
+    subscribe_col, test_col = st.columns(2)
+    with subscribe_col:
         subscribe_clicked = st.button("Subscribe", use_container_width=True, key="btn_subscribe", type="primary")
-    with sub_col2:
+    with test_col:
         test_clicked = st.button("Test Alert", use_container_width=True, key="btn_test")
 
     if subscribe_clicked:
         if chat_id_input.strip():
-            cid = chat_id_input.strip()
+            chat_id = chat_id_input.strip()
             try:
-                with open("data/subscribers.json") as fp:
-                    subs = json.load(fp)
+                with open("data/subscribers.json") as subscribers_file:
+                    subscribers = json.load(subscribers_file)
             except Exception:
-                subs = []
-            if cid not in subs:
-                subs.append(cid)
-                with open("data/subscribers.json", "w") as fp:
-                    json.dump(subs, fp)
-            ok, msg = send_telegram(
-                cid,
+                subscribers = []
+            if chat_id not in subscribers:
+                subscribers.append(chat_id)
+                with open("data/subscribers.json", "w") as subscribers_file:
+                    json.dump(subscribers, subscribers_file)
+            ok, error_msg = send_telegram(
+                chat_id,
                 "You are now subscribed to TNB Siltation Monitor alerts.\n\nYou will receive notifications when any zone exceeds the configured thresholds.\n\nTNB Siltation Monitor — EO Dashboard"
             )
-            st.markdown(f'<div class="sb-feedback {"sb-ok" if ok else "sb-err"}">{"Subscribed successfully." if ok else f"Failed: {msg}"}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="sb-feedback {"sb-ok" if ok else "sb-err"}">{"Subscribed successfully." if ok else f"Failed: {error_msg}"}</div>', unsafe_allow_html=True)
         else:
             st.markdown('<div class="sb-feedback sb-warn">Enter a chat ID first.</div>', unsafe_allow_html=True)
 
     if test_clicked:
         if chat_id_input.strip():
-            test_msg = build_alert_message("Timah Tasoh Reservoir", "0.142", "critical", "turbidity", "Hydro")
-            ok, err = send_telegram(chat_id_input.strip(), test_msg)
-            st.markdown(f'<div class="sb-feedback {"sb-ok" if ok else "sb-err"}">{"Test alert sent to Telegram." if ok else f"Failed: {err}"}</div>', unsafe_allow_html=True)
+            test_message = build_alert_message("Timah Tasoh Reservoir", "0.142", "critical", "turbidity", "Hydro")
+            ok, error_msg = send_telegram(chat_id_input.strip(), test_message)
+            st.markdown(f'<div class="sb-feedback {"sb-ok" if ok else "sb-err"}">{"Test alert sent to Telegram." if ok else f"Failed: {error_msg}"}</div>', unsafe_allow_html=True)
         else:
             st.markdown('<div class="sb-feedback sb-warn">Enter a chat ID first.</div>', unsafe_allow_html=True)
     st.markdown(f'<div style="font-size:10px;color:{t["text4"]};margin-top:8px;line-height:1.6;">Get your ID via <b style="color:{t["text3"]};">@userinfobot</b> on Telegram.</div>', unsafe_allow_html=True)
@@ -451,56 +459,70 @@ with st.sidebar:
 
 
 # ══════════════════════════════════════════════════════════════
-# LOAD & FILTER
+# LOAD & FILTER DATA
 # ══════════════════════════════════════════════════════════════
 
-if view_choice=="Hydro Reservoir":
-    all_z=classify_hydro_status(load_hydro_data(), warn_thresh, crit_thresh)
-    tdf=load_hydro_trends(); vcol="turbidity"; mname="Turbidity"; tnote="Higher = worse water quality"
+if view_choice == "Hydro Reservoir":
+    all_zones  = classify_hydro_status(load_hydro_data(), warning_threshold, critical_threshold)
+    trends_df  = load_hydro_trends()
+    value_col  = "turbidity"
+    module_name = "Turbidity"
+    threshold_note = "Higher = worse water quality"
 else:
-    all_z=classify_agri_status(load_agri_data(), warn_thresh, crit_thresh)
-    tdf=load_agri_trends(); vcol="ndvi"; mname="NDVI"; tnote="Lower = vegetation stress"
+    all_zones  = classify_agri_status(load_agri_data(), warning_threshold, critical_threshold)
+    trends_df  = load_agri_trends()
+    value_col  = "ndvi"
+    module_name = "NDVI"
+    threshold_note = "Lower = vegetation stress"
 
-filt=all_z[all_z["status"].isin(active_st)].copy()
-tot=len(all_z); ft=len(filt)
-nc=len(filt[filt["status"]=="critical"]); nw=len(filt[filt["status"]=="warning"]); nn=len(filt[filt["status"]=="normal"])
-av=round(filt[vcol].mean(),2) if not filt.empty else 0
-f_alr=[a for a in get_all_alerts(all_z, vcol) if a["status"] in active_st]
+filtered_zones = all_zones[all_zones["status"].isin(active_statuses)].copy()
+total_zones    = len(all_zones)
+filtered_count = len(filtered_zones)
+num_critical   = len(filtered_zones[filtered_zones["status"] == "critical"])
+num_warning    = len(filtered_zones[filtered_zones["status"] == "warning"])
+num_normal     = len(filtered_zones[filtered_zones["status"] == "normal"])
+avg_value      = round(filtered_zones[value_col].mean(), 2) if not filtered_zones.empty else 0
+filtered_alerts = [a for a in get_all_alerts(all_zones, value_col) if a["status"] in active_statuses]
 
 # Auto-send alerts to subscribers when threshold is breached
-if f_alr:
+if filtered_alerts:
     try:
-        with open("data/subscribers.json") as fp:
-            _subs = json.load(fp)
+        with open("data/subscribers.json") as subscribers_file:
+            subscribers = json.load(subscribers_file)
     except Exception:
-        _subs = []
-    if _subs:
-        _sent_key = f"sent_keys_{vcol}"
-        if _sent_key not in st.session_state:
-            st.session_state[_sent_key] = set()
-        _current_keys = {f"{a['zone']}_{a['severity']}" for a in f_alr}
-        _new_alerts = [a for a in f_alr if f"{a['zone']}_{a['severity']}" not in st.session_state[_sent_key]]
-        for _a in _new_alerts:
-            _row = all_z[all_z["name"] == _a["zone"]]
-            _val = round(_row[vcol].iloc[0], 4) if not _row.empty else "N/A"
-            _msg = build_alert_message(_a["zone"], str(_val), _a["severity"], vcol, mname)
-            for _cid in _subs:
-                send_telegram(_cid, _msg)
-        st.session_state[_sent_key] = _current_keys
+        subscribers = []
+    if subscribers:
+        sent_state_key = f"sent_keys_{value_col}"
+        if sent_state_key not in st.session_state:
+            st.session_state[sent_state_key] = set()
+        current_alert_keys = {f"{alert['zone']}_{alert['severity']}" for alert in filtered_alerts}
+        new_alerts = [
+            alert for alert in filtered_alerts
+            if f"{alert['zone']}_{alert['severity']}" not in st.session_state[sent_state_key]
+        ]
+        for alert in new_alerts:
+            zone_row = all_zones[all_zones["name"] == alert["zone"]]
+            index_value = round(zone_row[value_col].iloc[0], 4) if not zone_row.empty else "N/A"
+            alert_message = build_alert_message(
+                alert["zone"], str(index_value), alert["severity"], value_col, module_name
+            )
+            for subscriber_chat_id in subscribers:
+                send_telegram(subscriber_chat_id, alert_message)
+        st.session_state[sent_state_key] = current_alert_keys
 else:
-    st.session_state[f"sent_keys_{vcol}"] = set()
+    st.session_state[f"sent_keys_{value_col}"] = set()
 
 
 # ══════════════════════════════════════════════════════════════
 # HEADER
 # ══════════════════════════════════════════════════════════════
 
-h1,h2=st.columns([3,1])
-with h1:
+header_col, live_col = st.columns([3, 1])
+with header_col:
     st.markdown(f"""<div class="dash-header"><div class="dash-logo">NS</div><div>
         <p class="dash-title">EO Monitoring Dashboard</p>
         <p class="dash-sub">NextGen Spark — Sentinel-2 Analytics Platform</p></div></div>""", unsafe_allow_html=True)
-with h2:
+with live_col:
     st.markdown(f"""<div style="display:flex;justify-content:flex-end;align-items:center;gap:14px;padding-top:16px;">
         <span class="meta-tag">Last update: {datetime.datetime.now().strftime("%d %b %Y, %H:%M")}</span>
         <span class="live-pill"><span class="live-dot-anim"></span>LIVE</span></div>""", unsafe_allow_html=True)
@@ -510,44 +532,45 @@ with h2:
 # KPI CARDS
 # ══════════════════════════════════════════════════════════════
 
-sub_lbl="NDTI Index" if vcol=="turbidity" else "Vegetation Index"
-cb='<span class="kpi-tag tag-red">Immediate attention</span>' if nc>0 else '<span class="kpi-tag tag-green">All clear</span>'
-wb='<span class="kpi-tag tag-amber">Under observation</span>' if nw>0 else '<span class="kpi-tag tag-green">All clear</span>'
+kpi_index_label = "NDTI Index" if value_col == "turbidity" else "Vegetation Index"
+critical_badge  = '<span class="kpi-tag tag-red">Immediate attention</span>'  if num_critical > 0 else '<span class="kpi-tag tag-green">All clear</span>'
+warning_badge   = '<span class="kpi-tag tag-amber">Under observation</span>' if num_warning  > 0 else '<span class="kpi-tag tag-green">All clear</span>'
 
 st.markdown(f"""
 <div class="kpi-row">
     <div class="kpi"><div class="kpi-accent" style="background:linear-gradient(90deg,{t['blue']},{t['green']});"></div>
-        <div class="kpi-label">Avg {mname}</div><div class="kpi-val">{av}</div><span class="kpi-tag tag-blue">{sub_lbl}</span></div>
-    <div class="kpi {'kpi-glow' if nc>0 else ''}"><div class="kpi-accent" style="background:{t['red']};"></div>
-        <div class="kpi-label">Critical Zones</div><div class="kpi-val">{nc}</div>{cb}</div>
+        <div class="kpi-label">Avg {module_name}</div><div class="kpi-val">{avg_value}</div><span class="kpi-tag tag-blue">{kpi_index_label}</span></div>
+    <div class="kpi {'kpi-glow' if num_critical>0 else ''}"><div class="kpi-accent" style="background:{t['red']};"></div>
+        <div class="kpi-label">Critical Zones</div><div class="kpi-val">{num_critical}</div>{critical_badge}</div>
     <div class="kpi"><div class="kpi-accent" style="background:{t['amber']};"></div>
-        <div class="kpi-label">Warning Zones</div><div class="kpi-val">{nw}</div>{wb}</div>
+        <div class="kpi-label">Warning Zones</div><div class="kpi-val">{num_warning}</div>{warning_badge}</div>
     <div class="kpi"><div class="kpi-accent" style="background:{t['green']};"></div>
-        <div class="kpi-label">Normal Zones</div><div class="kpi-val">{nn}</div><span class="kpi-tag tag-green">Within safe range</span></div>
+        <div class="kpi-label">Normal Zones</div><div class="kpi-val">{num_normal}</div><span class="kpi-tag tag-green">Within safe range</span></div>
 </div>""", unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════════════════════
-# TREND
+# TREND CHART
 # ══════════════════════════════════════════════════════════════
 
 st.markdown("")
 st.markdown(f"""<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-    <span class="panel-label" style="margin:0;">TREND: {mname} — Historical Readings</span><span class="note-box">{tnote}</span></div>""", unsafe_allow_html=True)
-st.altair_chart(build_trend_chart(tdf,vcol), use_container_width=True)
+    <span class="panel-label" style="margin:0;">TREND: {module_name} — Historical Readings</span>
+    <span class="note-box">{threshold_note}</span></div>""", unsafe_allow_html=True)
+st.altair_chart(build_trend_chart(trends_df, value_col), use_container_width=True)
 
 
 # ══════════════════════════════════════════════════════════════
-# MAP + ZONES
+# MAP + ZONE DETAILS
 # ══════════════════════════════════════════════════════════════
 
-mc,dc=st.columns([2,1])
-with mc:
-    ml="Reservoir Locations — Peninsular Malaysia" if vcol=="turbidity" else "Agricultural Zones — Northern Malaysia"
+map_col, details_col = st.columns([2, 1])
+with map_col:
+    map_label = "Reservoir Locations — Peninsular Malaysia" if value_col == "turbidity" else "Agricultural Zones — Northern Malaysia"
     st.markdown(f"""<div class="panel" style="margin-bottom:0;overflow:hidden;"><div class="panel-head">
-        <span class="panel-label">MAP: {ml}</span><span class="meta-tag">Sentinel-2 L2A</span></div></div>""", unsafe_allow_html=True)
-    if not filt.empty:
-        st.pydeck_chart(build_map(filt,vcol),height=520)
+        <span class="panel-label">MAP: {map_label}</span><span class="meta-tag">Sentinel-2 L2A</span></div></div>""", unsafe_allow_html=True)
+    if not filtered_zones.empty:
+        st.pydeck_chart(build_map(filtered_zones, value_col), height=520)
     else:
         st.markdown(f"""<div style="height:520px;display:flex;align-items:center;justify-content:center;
             background:{t['bg_card']};border:1px solid {t['border']};border-top:none;border-radius:0 0 14px 14px;">
@@ -558,55 +581,56 @@ with mc:
         <div style="display:flex;align-items:center;gap:6px;"><span class="dot dot-r"></span><span style="font-size:11px;color:{t['text3']};">Critical</span></div>
     </div>""", unsafe_allow_html=True)
 
-with dc:
+with details_col:
     st.markdown(f"""<div class="panel"><div class="panel-body"><div class="panel-label" style="margin-bottom:16px;">DISTRIBUTION: Zone Health</div>""", unsafe_allow_html=True)
-    for lb,cnt,ch in [("Normal",nn,t['green']),("Warning",nw,t['amber']),("Critical",nc,t['red'])]:
-        pc=round((cnt/tot)*100) if tot>0 else 0
+    for label, count, color in [("Normal", num_normal, t['green']), ("Warning", num_warning, t['amber']), ("Critical", num_critical, t['red'])]:
+        percentage = round((count / total_zones) * 100) if total_zones > 0 else 0
         st.markdown(f"""<div style="display:flex;justify-content:space-between;align-items:center;">
-            <span style="font-size:12.5px;color:{t['text2']};">{lb}</span>
-            <span style="font-size:12.5px;color:{ch};font-weight:600;font-family:'JetBrains Mono',monospace;">{cnt} <span style="color:{t['text4']};font-weight:400;">({pc}%)</span></span></div>
-        <div class="dbar-track"><div class="dbar-fill" style="width:{pc}%;background:{ch};"></div></div>""", unsafe_allow_html=True)
+            <span style="font-size:12.5px;color:{t['text2']};">{label}</span>
+            <span style="font-size:12.5px;color:{color};font-weight:600;font-family:'JetBrains Mono',monospace;">{count} <span style="color:{t['text4']};font-weight:400;">({percentage}%)</span></span></div>
+        <div class="dbar-track"><div class="dbar-fill" style="width:{percentage}%;background:{color};"></div></div>""", unsafe_allow_html=True)
     st.markdown(f"""<div style="border-top:1px solid {t['border']};padding-top:14px;margin-top:4px;display:flex;justify-content:space-between;align-items:center;">
             <span style="font-size:11px;color:{t['text4']};">Showing / Total</span>
-            <span style="font-size:24px;font-weight:800;color:{t['text1']};font-family:'JetBrains Mono',monospace;">{ft}<span style="font-size:14px;color:{t['text4']};font-weight:400;">/{tot}</span></span>
+            <span style="font-size:24px;font-weight:800;color:{t['text1']};font-family:'JetBrains Mono',monospace;">{filtered_count}<span style="font-size:14px;color:{t['text4']};font-weight:400;">/{total_zones}</span></span>
         </div></div></div>""", unsafe_allow_html=True)
 
     st.markdown("")
     st.markdown(f'<p class="sb-label" style="margin-top:8px;">Zone Details</p>', unsafe_allow_html=True)
-    if filt.empty:
+    if filtered_zones.empty:
         st.markdown(f'<div style="color:{t["text4"]};font-size:12px;padding:12px 0;">No zones to display</div>', unsafe_allow_html=True)
     else:
-        STATUS = {
+        STATUS_STYLES = {
             "critical": {"card": "zcard-crit", "color": "c-r", "dot": "dot-r"},
             "warning":  {"card": "zcard-warn", "color": "c-y", "dot": "dot-y"},
             "normal":   {"card": "",            "color": "c-g", "dot": "dot-g"},
         }
-        for _, r in filt.iterrows():
-            s  = STATUS[r["status"]]
-            v  = r[vcol]
-            ta={"rising":"↑","falling":"↓"}.get(r["trend"],"→")
-            dl=f"NDWI: {r['ndwi']}" if vcol=="turbidity" else f"NDRE: {r['ndre']}"
-            st.markdown(f"""<div class="zcard {s['card']}"><div style="display:flex;justify-content:space-between;align-items:flex-start;">
-                <div><div class="zname"><span class="dot {s['dot']}"></span>{r['name']}</div><div class="zmeta">{dl}</div></div>
-                <div style="text-align:right;"><div class="zval {s['color']}">{v}</div><div style="font-size:10px;color:{t['text4']};">{ta} {r['trend']}</div></div></div></div>""", unsafe_allow_html=True)
+        for _, zone_row in filtered_zones.iterrows():
+            zone_style   = STATUS_STYLES[zone_row["status"]]
+            zone_value   = zone_row[value_col]
+            trend_arrow  = {"rising": "↑", "falling": "↓"}.get(zone_row["trend"], "→")
+            detail_label = f"NDWI: {zone_row['ndwi']}" if value_col == "turbidity" else f"NDRE: {zone_row['ndre']}"
+            st.markdown(f"""<div class="zcard {zone_style['card']}"><div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                <div><div class="zname"><span class="dot {zone_style['dot']}"></span>{zone_row['name']}</div><div class="zmeta">{detail_label}</div></div>
+                <div style="text-align:right;"><div class="zval {zone_style['color']}">{zone_value}</div><div style="font-size:10px;color:{t['text4']};">{trend_arrow} {zone_row['trend']}</div></div></div></div>""", unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════════════════════
-# ALERTS
+# ALERTS PANEL
 # ══════════════════════════════════════════════════════════════
 
 st.markdown("")
-fc=[a for a in f_alr if a["severity"]=="critical"]
-ah=f"ALERTS: Active ({len(f_alr)})"
-if fc: ah+=f" · {len(fc)} critical"
+critical_alerts  = [alert for alert in filtered_alerts if alert["severity"] == "critical"]
+alerts_header    = f"ALERTS: Active ({len(filtered_alerts)})"
+if critical_alerts:
+    alerts_header += f" · {len(critical_alerts)} critical"
 st.markdown(f"""<div class="panel" style="overflow:hidden;"><div class="panel-head">
-    <span class="panel-label">{ah}</span><span class="meta-tag">Today, {datetime.datetime.now().strftime("%d %b %Y")}</span></div>""", unsafe_allow_html=True)
-if f_alr:
-    for a in f_alr:
-        ac = "alrt-crit" if a["severity"] == "critical" else "alrt-warn"
-        st.markdown(f"""<div class="alrt {ac}"><div style="display:flex;justify-content:space-between;align-items:center;">
-            <span class="alrt-zone">{a['zone']}</span><span class="alrt-time">{a['time']}</span></div>
-            <div class="alrt-msg">{a['message']}</div></div>""", unsafe_allow_html=True)
+    <span class="panel-label">{alerts_header}</span><span class="meta-tag">Today, {datetime.datetime.now().strftime("%d %b %Y")}</span></div>""", unsafe_allow_html=True)
+if filtered_alerts:
+    for alert in filtered_alerts:
+        alert_css_class = "alrt-crit" if alert["severity"] == "critical" else "alrt-warn"
+        st.markdown(f"""<div class="alrt {alert_css_class}"><div style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="alrt-zone">{alert['zone']}</span><span class="alrt-time">{alert['time']}</span></div>
+            <div class="alrt-msg">{alert['message']}</div></div>""", unsafe_allow_html=True)
 else:
     st.markdown(f"""<div style="padding:28px;text-align:center;color:{t['text4']};font-size:12px;">No alerts for the current filter</div>""", unsafe_allow_html=True)
 st.markdown("</div>", unsafe_allow_html=True)
