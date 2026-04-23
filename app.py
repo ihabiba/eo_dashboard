@@ -73,10 +73,10 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
-    theme_choice = st.radio("Theme", ["Dark", "Light"], horizontal=True,
+    theme_choice = st.radio("Theme", ["Light", "Dark"], horizontal=True,
                             label_visibility="collapsed")
 
-t = DARK if theme_choice == "Dark" else LIGHT
+t = LIGHT if theme_choice == "Light" else DARK
 
 # ──────────────────────────────────────────────────────────────
 # DYNAMIC CSS
