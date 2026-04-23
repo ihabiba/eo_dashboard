@@ -22,7 +22,15 @@ jobs:
         run: pip install requests pandas
 
       - name: Write subscribers list
-        run: echo '${{ secrets.TELEGRAM_SUBSCRIBERS }}' > data/subscribers.json
+        run: |
+          python -c "
+          import json, os
+          ids = [i.strip() for i in os.environ['TELEGRAM_SUBSCRIBERS'].split(',') if i.strip()]
+          with open('data/subscribers.json', 'w') as f:
+              json.dump(ids, f)
+          "
+        env:
+          TELEGRAM_SUBSCRIBERS: ${{ secrets.TELEGRAM_SUBSCRIBERS }}
 
       - name: Run alert check
         env:
