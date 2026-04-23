@@ -183,6 +183,109 @@ def get_css(t, theme_choice):
     .alrt-msg  {{ font-size:12px; color:{t['text3']}; line-height:1.45; margin-top:3px; }}
     .alrt-time {{ font-size:10px; color:{t['text4']}; font-family:'JetBrains Mono',monospace; }}
 
+    /* ── Radio buttons ── */
+    section[data-testid="stSidebar"] div[role="radiogroup"] {{
+        color: {t['text3']} !important;
+    }}
+    section[data-testid="stSidebar"] .stRadio label > div:first-child {{
+        border-color: {t['text3']} !important;
+        color: {t['text3']} !important;
+    }}
+
+    /* ── Sliders ── */
+    section[data-testid="stSidebar"] .stSlider label,
+    section[data-testid="stSidebar"] .stSlider label p {{
+        color: {t['sb_text']} !important;
+        font-size: 12px !important;
+        font-family: 'Inter', sans-serif !important;
+    }}
+    section[data-testid="stSidebar"] [data-testid="stSliderTickBar"],
+    section[data-testid="stSidebar"] [data-testid="stSliderTickBar"] div,
+    section[data-testid="stSidebar"] [data-testid="stTickBarMin"],
+    section[data-testid="stSidebar"] [data-testid="stTickBarMax"] {{
+        color: {t['text2']} !important;
+        background: transparent !important;
+        font-size: 10px !important;
+        font-family: 'JetBrains Mono', monospace !important;
+        font-weight: 600 !important;
+        opacity: 1 !important;
+    }}
+    section[data-testid="stSidebar"] [data-baseweb="slider"] div[role="slider"] {{
+        background-color: {t['blue']} !important;
+        border-color: {t['blue']} !important;
+    }}
+    section[data-testid="stSidebar"] [data-baseweb="slider"] div[role="slider"]:focus {{
+        box-shadow: 0 0 0 4px {t['blue_bg']} !important;
+    }}
+    section[data-testid="stSidebar"] [data-baseweb="slider"] > div > div:first-child {{
+        background-color: {t['border']} !important;
+    }}
+    section[data-testid="stSidebar"] [data-baseweb="slider"] > div > div:nth-child(2) {{
+        background-color: {t['blue']} !important;
+    }}
+
+    /* ── Subscription text input ── */
+    section[data-testid="stSidebar"] .stTextInput input {{
+        background-color: {t['bg_card']} !important;
+        border: 1px solid {t['border']} !important;
+        border-radius: 8px !important;
+        color: {t['text1']} !important;
+        font-size: 13px !important;
+        font-family: 'JetBrains Mono', monospace !important;
+        padding: 8px 12px !important;
+    }}
+    section[data-testid="stSidebar"] .stTextInput input:focus {{
+        border-color: {t['blue']} !important;
+        box-shadow: 0 0 0 3px {t['blue_bg']} !important;
+        outline: none !important;
+    }}
+    section[data-testid="stSidebar"] .stTextInput input::placeholder {{
+        color: {t['text4']} !important;
+        font-size: 11px !important;
+    }}
+
+    /* ── Sidebar buttons ── */
+    section[data-testid="stSidebar"] .stButton > button {{
+        border-radius: 8px !important;
+        font-size: 12px !important;
+        font-weight: 600 !important;
+        font-family: 'Inter', sans-serif !important;
+        padding: 6px 10px !important;
+        transition: all 0.2s !important;
+        border: 1px solid {t['border']} !important;
+        background-color: {t['bg_card']} !important;
+        color: {t['text2']} !important;
+    }}
+    section[data-testid="stSidebar"] .stButton > button:hover {{
+        border-color: {t['blue']} !important;
+        color: {t['blue']} !important;
+        background-color: {t['blue_bg']} !important;
+    }}
+    section[data-testid="stSidebar"] .stButton > button[kind="primary"] {{
+        background-color: {t['blue']} !important;
+        border-color: {t['blue']} !important;
+        color: #ffffff !important;
+    }}
+    section[data-testid="stSidebar"] .stButton > button[kind="primary"]:hover {{
+        background-color: {t['blue']} !important;
+        opacity: 0.88;
+        color: #ffffff !important;
+    }}
+
+    /* ── Subscription feedback pills ── */
+    .sb-feedback {{
+        padding: 8px 12px;
+        border-radius: 8px;
+        font-size: 11.5px;
+        font-weight: 500;
+        margin-top: 6px;
+        font-family: 'Inter', sans-serif;
+        line-height: 1.4;
+    }}
+    .sb-ok  {{ background:{t['green_bg']}; color:{t['green']}; border:1px solid {t['green_bdr']}; }}
+    .sb-err {{ background:{t['red_bg']};   color:{t['red']};   border:1px solid {t['red_bdr']};   }}
+    .sb-warn {{ background:{t['amber_bg']}; color:{t['amber']}; border:1px solid {t['amber_bdr']}; }}
+
     /* ── Misc ── */
     .note-box {{
         font-size:10px; color:{t['text4']}; font-family:'JetBrains Mono',monospace;

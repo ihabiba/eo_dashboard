@@ -6,14 +6,45 @@ Built with Streamlit — Prototype v1.0
 
 import streamlit as st
 import pandas as pd
-import numpy as np
 import pydeck as pdk
 import altair as alt
 import datetime
 import json
 
+import requests
+
 from utils.theme import DARK, LIGHT
 from utils.styles import get_css
+
+# ──────────────────────────────────────────────────────────────
+# TELEGRAM
+# ──────────────────────────────────────────────────────────────
+
+def send_telegram(chat_id, message):
+    token = st.secrets.get("TELEGRAM_BOT_TOKEN", "")
+    if not token:
+        return False, "Bot token not configured in secrets."
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    resp = requests.post(url, json={"chat_id": chat_id, "text": message, "parse_mode": "HTML"})
+    if resp.status_code == 200:
+        return True, "Sent"
+    return False, resp.json().get("description", "Unknown error")
+
+def build_alert_message(zone_name, index_val, status, vcol, module):
+    now = datetime.datetime.now().strftime("%d %b %Y, %H:%M")
+    index_label = "NDTI" if vcol == "turbidity" else "NDVI"
+    status_emoji = "🔴" if status == "critical" else "🟡"
+    status_line  = "CRITICAL" if status == "critical" else "WARNING"
+    return (
+        f"<b>{status_emoji} {status_line} — {module} Zone Alert</b>\n\n"
+        f"<b>Zone:</b> {zone_name}\n"
+        f"<b>Time:</b> {now}\n"
+        f"<b>{index_label}:</b> {index_val}\n"
+        f"<b>Status:</b> {status_line}\n\n"
+        f"Please open the dashboard to review the latest readings and take action if needed.\n\n"
+        f"<i>TNB Siltation Monitor — EO Dashboard</i>"
+    )
+
 
 # ──────────────────────────────────────────────────────────────
 # PAGE CONFIG
@@ -57,7 +88,7 @@ st.markdown(get_css(t, theme_choice), unsafe_allow_html=True)
 
 
 # ──────────────────────────────────────────────────────────────
-# REAL DATA — CSV + GeoJSON from Nawran
+# SAMPLE DATA — CSV + GeoJSON from Nawran
 # ──────────────────────────────────────────────────────────────
 
 @st.cache_data
@@ -182,6 +213,24 @@ def get_all_alerts(zone_df, vcol):
         alerts.append({"severity": row["status"], "status": row["status"],
                         "zone": row["name"], "time": time_str, "message": msg})
     return alerts
+
+def classify_hydro_status(df, warn_thresh, crit_thresh):
+    df = df.copy()
+    def _s(v):
+        if v >= crit_thresh: return "critical"
+        if v >= warn_thresh: return "warning"
+        return "normal"
+    df["status"] = df["turbidity"].apply(_s)
+    return df
+
+def classify_agri_status(df, warn_thresh, crit_thresh):
+    df = df.copy()
+    def _s(v):
+        if v < crit_thresh: return "critical"
+        if v < warn_thresh: return "warning"
+        return "normal"
+    df["status"] = df["ndvi"].apply(_s)
+    return df
 
 
 # ──────────────────────────────────────────────────────────────
@@ -333,17 +382,65 @@ with st.sidebar:
     if s_c: active_st.append("critical")
 
     st.markdown("---")
-    st.markdown(f'<p class="sb-label">Threshold Reference</p>', unsafe_allow_html=True)
-    if view_choice=="Hydro Reservoir":
-        st.markdown(f"""<div style="font-size:11px;line-height:2.2;color:{t['sb_text']};">
-            <span style="color:{t['green']};">●</span> Normal: Turbidity &lt; 0.40<br>
-            <span style="color:{t['amber']};">●</span> Warning: 0.40 – 0.60<br>
-            <span style="color:{t['red']};">●</span> Critical: &gt; 0.60</div>""", unsafe_allow_html=True)
+    st.markdown(f'<p class="sb-label">Thresholds</p>', unsafe_allow_html=True)
+    if view_choice == "Hydro Reservoir":
+        warn_thresh = st.slider("Warning level (NDTI >=)", 0.0, 1.0, 0.40, 0.05, key="hydro_warn")
+        crit_thresh = st.slider("Critical level (NDTI >=)", 0.0, 1.0, 0.60, 0.05, key="hydro_crit")
+        st.markdown(f"""<div style="font-size:10.5px;line-height:2.2;color:{t['sb_text']};">
+            <span style="color:{t['green']};">●</span> Normal: &lt; {warn_thresh:.2f}<br>
+            <span style="color:{t['amber']};">●</span> Warning: {warn_thresh:.2f} – {crit_thresh:.2f}<br>
+            <span style="color:{t['red']};">●</span> Critical: ≥ {crit_thresh:.2f}</div>""", unsafe_allow_html=True)
     else:
-        st.markdown(f"""<div style="font-size:11px;line-height:2.2;color:{t['sb_text']};">
-            <span style="color:{t['green']};">●</span> Normal: NDVI &gt; 0.55<br>
-            <span style="color:{t['amber']};">●</span> Warning: 0.40 – 0.55<br>
-            <span style="color:{t['red']};">●</span> Critical: &lt; 0.40</div>""", unsafe_allow_html=True)
+        warn_thresh = st.slider("Warning level (NDVI <)", 0.0, 1.0, 0.55, 0.05, key="agri_warn")
+        crit_thresh = st.slider("Critical level (NDVI <)", 0.0, 1.0, 0.40, 0.05, key="agri_crit")
+        st.markdown(f"""<div style="font-size:10.5px;line-height:2.2;color:{t['sb_text']};">
+            <span style="color:{t['green']};">●</span> Normal: &gt; {warn_thresh:.2f}<br>
+            <span style="color:{t['amber']};">●</span> Warning: {crit_thresh:.2f} – {warn_thresh:.2f}<br>
+            <span style="color:{t['red']};">●</span> Critical: &lt; {crit_thresh:.2f}</div>""", unsafe_allow_html=True)
+
+    st.markdown("---")
+    st.markdown(f'<p class="sb-label">Alert Subscription</p>', unsafe_allow_html=True)
+    st.markdown(f'<p style="font-size:11px;color:{t["text4"]};margin:0 0 10px;">Paste your Telegram chat ID to receive alerts.</p>', unsafe_allow_html=True)
+    chat_id_input = st.text_input(
+        "Telegram Chat ID",
+        placeholder="e.g. 1761625405",
+        label_visibility="collapsed",
+        key="chat_id_input"
+    )
+    sub_col1, sub_col2 = st.columns(2)
+    with sub_col1:
+        subscribe_clicked = st.button("Subscribe", use_container_width=True, key="btn_subscribe", type="primary")
+    with sub_col2:
+        test_clicked = st.button("Test Alert", use_container_width=True, key="btn_test")
+
+    if subscribe_clicked:
+        if chat_id_input.strip():
+            cid = chat_id_input.strip()
+            try:
+                with open("data/subscribers.json") as fp:
+                    subs = json.load(fp)
+            except Exception:
+                subs = []
+            if cid not in subs:
+                subs.append(cid)
+                with open("data/subscribers.json", "w") as fp:
+                    json.dump(subs, fp)
+            ok, msg = send_telegram(
+                cid,
+                "You are now subscribed to TNB Siltation Monitor alerts.\n\nYou will receive notifications when any zone exceeds the configured thresholds.\n\nTNB Siltation Monitor — EO Dashboard"
+            )
+            st.markdown(f'<div class="sb-feedback {"sb-ok" if ok else "sb-err"}">{"Subscribed successfully." if ok else f"Failed: {msg}"}</div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="sb-feedback sb-warn">Enter a chat ID first.</div>', unsafe_allow_html=True)
+
+    if test_clicked:
+        if chat_id_input.strip():
+            test_msg = build_alert_message("Timah Tasoh Reservoir", "0.142", "critical", "turbidity", "Hydro")
+            ok, err = send_telegram(chat_id_input.strip(), test_msg)
+            st.markdown(f'<div class="sb-feedback {"sb-ok" if ok else "sb-err"}">{"Test alert sent to Telegram." if ok else f"Failed: {err}"}</div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="sb-feedback sb-warn">Enter a chat ID first.</div>', unsafe_allow_html=True)
+    st.markdown(f'<div style="font-size:10px;color:{t["text4"]};margin-top:8px;line-height:1.6;">Get your ID via <b style="color:{t["text3"]};">@userinfobot</b> on Telegram.</div>', unsafe_allow_html=True)
 
     st.markdown("---")
     st.markdown(f"""<div style="font-size:10px;color:{t['text4']};line-height:1.7;padding-top:6px;">
@@ -358,15 +455,40 @@ with st.sidebar:
 # ══════════════════════════════════════════════════════════════
 
 if view_choice=="Hydro Reservoir":
-    all_z=load_hydro_data(); tdf=load_hydro_trends(); vcol="turbidity"; mname="Turbidity"; tnote="Higher = worse water quality"
+    all_z=classify_hydro_status(load_hydro_data(), warn_thresh, crit_thresh)
+    tdf=load_hydro_trends(); vcol="turbidity"; mname="Turbidity"; tnote="Higher = worse water quality"
 else:
-    all_z=load_agri_data(); tdf=load_agri_trends(); vcol="ndvi"; mname="NDVI"; tnote="Lower = vegetation stress"
+    all_z=classify_agri_status(load_agri_data(), warn_thresh, crit_thresh)
+    tdf=load_agri_trends(); vcol="ndvi"; mname="NDVI"; tnote="Lower = vegetation stress"
 
 filt=all_z[all_z["status"].isin(active_st)].copy()
 tot=len(all_z); ft=len(filt)
 nc=len(filt[filt["status"]=="critical"]); nw=len(filt[filt["status"]=="warning"]); nn=len(filt[filt["status"]=="normal"])
 av=round(filt[vcol].mean(),2) if not filt.empty else 0
 f_alr=[a for a in get_all_alerts(all_z, vcol) if a["status"] in active_st]
+
+# Auto-send alerts to subscribers when threshold is breached
+if f_alr:
+    try:
+        with open("data/subscribers.json") as fp:
+            _subs = json.load(fp)
+    except Exception:
+        _subs = []
+    if _subs:
+        _sent_key = f"sent_keys_{vcol}"
+        if _sent_key not in st.session_state:
+            st.session_state[_sent_key] = set()
+        _current_keys = {f"{a['zone']}_{a['severity']}" for a in f_alr}
+        _new_alerts = [a for a in f_alr if f"{a['zone']}_{a['severity']}" not in st.session_state[_sent_key]]
+        for _a in _new_alerts:
+            _row = all_z[all_z["name"] == _a["zone"]]
+            _val = round(_row[vcol].iloc[0], 4) if not _row.empty else "N/A"
+            _msg = build_alert_message(_a["zone"], str(_val), _a["severity"], vcol, mname)
+            for _cid in _subs:
+                send_telegram(_cid, _msg)
+        st.session_state[_sent_key] = _current_keys
+else:
+    st.session_state[f"sent_keys_{vcol}"] = set()
 
 
 # ══════════════════════════════════════════════════════════════
@@ -403,6 +525,16 @@ st.markdown(f"""
     <div class="kpi"><div class="kpi-accent" style="background:{t['green']};"></div>
         <div class="kpi-label">Normal Zones</div><div class="kpi-val">{nn}</div><span class="kpi-tag tag-green">Within safe range</span></div>
 </div>""", unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════
+# TREND
+# ══════════════════════════════════════════════════════════════
+
+st.markdown("")
+st.markdown(f"""<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+    <span class="panel-label" style="margin:0;">TREND: {mname} — Historical Readings</span><span class="note-box">{tnote}</span></div>""", unsafe_allow_html=True)
+st.altair_chart(build_trend_chart(tdf,vcol), use_container_width=True)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -457,16 +589,6 @@ with dc:
             st.markdown(f"""<div class="zcard {s['card']}"><div style="display:flex;justify-content:space-between;align-items:flex-start;">
                 <div><div class="zname"><span class="dot {s['dot']}"></span>{r['name']}</div><div class="zmeta">{dl}</div></div>
                 <div style="text-align:right;"><div class="zval {s['color']}">{v}</div><div style="font-size:10px;color:{t['text4']};">{ta} {r['trend']}</div></div></div></div>""", unsafe_allow_html=True)
-
-
-# ══════════════════════════════════════════════════════════════
-# TREND
-# ══════════════════════════════════════════════════════════════
-
-st.markdown("")
-st.markdown(f"""<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-    <span class="panel-label" style="margin:0;">TREND: {mname} — Historical Readings</span><span class="note-box">{tnote}</span></div>""", unsafe_allow_html=True)
-st.altair_chart(build_trend_chart(tdf,vcol), use_container_width=True)
 
 
 # ══════════════════════════════════════════════════════════════
