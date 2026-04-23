@@ -1,0 +1,30 @@
+name: Daily Alert Check
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # Runs daily at 00:00 UTC (08:00 Malaysia time)
+  workflow_dispatch:       # Allows manual trigger from GitHub Actions tab
+
+jobs:
+  alert:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests pandas
+
+      - name: Write subscribers list
+        run: echo '${{ secrets.TELEGRAM_SUBSCRIBERS }}' > data/subscribers.json
+
+      - name: Run alert check
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: python alert_watcher.py --once
