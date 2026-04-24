@@ -1,9 +1,4 @@
-"""
-Dashboard CSS — NextGen Spark EO Monitoring
-All visual styling lives here. Import get_css(t, theme_choice) into app.py.
-t            → active theme dict — pass DARK or LIGHT from utils.theme
-theme_choice → "Dark" or "Light" string (used for one conditional rule)
-"""
+# Dashboard CSS
 
 
 def get_css(t, theme_choice):

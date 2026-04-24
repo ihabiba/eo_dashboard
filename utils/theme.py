@@ -1,7 +1,4 @@
-"""
-Theme color palettes — NextGen Spark EO Monitoring
-Import DARK and LIGHT into any file that needs colors.
-"""
+# Theme color palettes — DARK and LIGHT
 
 DARK = {
     "bg": "#1a1f2e",

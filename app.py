@@ -1,8 +1,4 @@
-"""
-EO Monitoring Dashboard — NextGen Spark
-Sentinel-2 Analytics | Hydro Reservoir & Agriculture Monitoring
-Built with Streamlit — Prototype v1.0
-"""
+# EO Monitoring Dashboard — NextGen Spark
 
 import streamlit as st
 import pandas as pd
@@ -90,7 +86,6 @@ st.markdown(get_css(t, theme_choice), unsafe_allow_html=True)
 
 @st.cache_data
 def load_zone_metadata():
-    """Extract centroid lat/lon from GeoJSON polygons."""
     with open("data/zones.geojson") as geojson_file:
         geojson = json.load(geojson_file)
     zones = {}
@@ -111,7 +106,6 @@ def load_raw_csv():
     return pd.read_csv("data/eo_monitoring_output.csv", parse_dates=["date"])
 
 def compute_trend(sorted_values):
-    """Compare last two readings to determine direction."""
     if len(sorted_values) < 2:
         return "stable"
     previous, current = sorted_values.iloc[-2], sorted_values.iloc[-1]

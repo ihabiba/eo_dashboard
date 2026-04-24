@@ -1,13 +1,5 @@
-"""
-TNB Siltation Monitor — Alert Watcher
-Runs independently of the dashboard. Checks data every N minutes and sends
-Telegram alerts to all subscribers when thresholds are exceeded.
-
-Usage:
-    python alert_watcher.py
-
-Keep this running in a terminal. It works even when no one has the dashboard open.
-"""
+# Alert Watcher — runs independently of the dashboard
+# Usage: python alert_watcher.py
 
 import time
 import json
@@ -136,7 +128,6 @@ def main():
 
 
 def run_once():
-    """Single check — used by GitHub Actions."""
     token = read_token()
     if not token:
         print("ERROR: TELEGRAM_BOT_TOKEN not found.")
